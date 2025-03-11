@@ -1,10 +1,11 @@
-import mongoose from "mongoose";
+import AWS from "aws-sdk";
 
-export const connectDB = async () => {
-  try {
-    const conn = await mongoose.connect(process.env.MONGODB_URI);
-    console.log(`MongoDB connected: ${conn.connection.host}`);
-  } catch (error) {
-    console.log("MongoDB connection error:", error);
-  }
-};
+AWS.config.update({
+  region: process.env.AWS_REGION, // Add your region here
+  accessKeyId: process.env.AWS_ACCESS_KEY_ID,
+  secretAccessKey: process.env.AWS_SECRET_ACCESS_KEY,
+});
+
+const dynamoDB = new AWS.DynamoDB.DocumentClient();
+
+export default dynamoDB;
