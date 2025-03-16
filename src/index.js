@@ -1,35 +1,32 @@
-import express from "express";
+import http from "http";
 import dotenv from "dotenv";
-import cookieParser from "cookie-parser";
-import cors from "cors";
 import path from "path";
-import messageRoutes from "./routes/message.route.js";
-import { app, server } from "./lib/socket.js";
+import app from "./app.js";
+import { initSocketServer } from "./lib/socket.js";
 
 dotenv.config();
 
-const PORT = process.env.PORT;
+const PORT = process.env.PORT || 8080;
 const __dirname = path.resolve();
 
-app.use(express.json());
-app.use(cookieParser());
-app.use(
-  cors({
-    origin: "*", // Update this to match your frontend domain or leave as "*" for testing
-    credentials: true,
-  })
-);
+// Create HTTP server using the Express app
+const server = http.createServer(app);
 
-app.use("/api/messages", messageRoutes);
+// Initialize Socket.IO with the server
+const io = initSocketServer(server);
 
-if (process.env.NODE_ENV === "production") {
-  app.use(express.static(path.join(__dirname, "../frontend/dist")));
-
-  app.get("*", (req, res) => {
-    res.sendFile(path.join(__dirname, "../frontend", "dist", "index.html"));
-  });
-}
-
+// Start the server
 server.listen(PORT, () => {
-  console.log("server is running on PORT:" + PORT);
+  console.log("Server is running on PORT:" + PORT);
 });
+
+// Handle graceful shutdown
+process.on("SIGTERM", () => {
+  console.log("SIGTERM received, shutting down gracefully");
+  server.close(() => {
+    console.log("HTTP server closed");
+    process.exit(0);
+  });
+});
+
+export { app, server, io };
