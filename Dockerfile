@@ -1,20 +1,20 @@
+# Base image
 FROM node:18-alpine
 
 # Create app directory
 WORKDIR /usr/src/app
 
-# Install app dependencies
-# A wildcard is used to ensure both package.json AND package-lock.json are copied
+# Copy package files
 COPY package*.json ./
 
+# Install dependencies
 RUN npm install
-# For production: RUN npm ci --omit=dev
 
-# Bundle app source
-COPY . .
+# Copy source code
+COPY ./src ./src
 
 # Expose the port your app runs on
 EXPOSE 8080
 
-# Define the command to run your app
+# Command to run the application
 CMD ["node", "src/index.js"]
