@@ -7,10 +7,13 @@ import {
   UpdateCommand,
 } from "@aws-sdk/lib-dynamodb";
 import { v4 as uuidv4 } from "uuid";
+import dotenv from "dotenv";
+
+dotenv.config();
 
 // Table names
-const USERS_TABLE = "Equilux_Users_Prosumers";
-const MESSAGES_TABLE = "Equilux_Messages";
+const USERS_TABLE = process.env.USERS_TABLE;
+const MESSAGES_TABLE = process.env.MESSAGES_TABLE;
 
 /**
  * Generate a consistent conversation ID from two user IDs
@@ -27,11 +30,11 @@ export const getConversationId = (userId1, userId2) => {
 export const getUsersExcept = async (userId) => {
   const params = {
     TableName: USERS_TABLE,
-    FilterExpression: "id <> :userId",
+    FilterExpression: "username <> :userId", // Changed from "id" to "username"
     ExpressionAttributeValues: {
       ":userId": userId,
     },
-    ProjectionExpression: "id, username, #status",
+    ProjectionExpression: "user_id, username, #status",
     ExpressionAttributeNames: {
       "#status": "status",
     },
@@ -196,7 +199,7 @@ export const findMessageById = async (messageId) => {
   // Try using GSI1 first (most recent messages by senderId)
   const gsi1Params = {
     TableName: MESSAGES_TABLE,
-    IndexName: "senderId-timestamp-index", // Your GSI1 name
+    IndexName: "GSI1", // Your GSI1 name
     FilterExpression: "messageId = :messageId",
     ExpressionAttributeValues: {
       ":messageId": messageId,
@@ -213,7 +216,7 @@ export const findMessageById = async (messageId) => {
   // If not found, try using GSI2
   const gsi2Params = {
     TableName: MESSAGES_TABLE,
-    IndexName: "receiverId-timestamp-index", // Your GSI2 name
+    IndexName: "GSI2", // Your GSI2 name
     FilterExpression: "messageId = :messageId",
     ExpressionAttributeValues: {
       ":messageId": messageId,
@@ -247,7 +250,7 @@ export const getMessagesSentByUser = async (
 ) => {
   const params = {
     TableName: MESSAGES_TABLE,
-    IndexName: "senderId-timestamp-index", // Name of your GSI1
+    IndexName: "GSI1", // Name of your GSI1
     KeyConditionExpression: "senderId = :senderId",
     ExpressionAttributeValues: {
       ":senderId": senderId,
@@ -285,7 +288,7 @@ export const getMessagesReceivedByUser = async (
 ) => {
   const params = {
     TableName: MESSAGES_TABLE,
-    IndexName: "receiverId-timestamp-index", // Name of your GSI2
+    IndexName: "GSI2", // Name of your GSI2
     KeyConditionExpression: "receiverId = :receiverId",
     ExpressionAttributeValues: {
       ":receiverId": receiverId,
@@ -397,69 +400,77 @@ export const getMessagesBetweenUsersPaginated = async (
 
 /**
  * Get all trade offers for a user (either as sender or receiver)
- * 
+ *
  * @param {string} userId - ID of the user
  * @param {string} role - "sender" or "receiver" or "both"
  * @param {string} status - Filter by status: "pending", "accept", "reject", "counter", or null for all
  * @returns {Promise<Array>} Array of trade offers
  */
-export const getTradeOffersForUser = async (userId, role = "both", status = null) => {
+export const getTradeOffersForUser = async (
+  userId,
+  role = "both",
+  status = null
+) => {
   let allOffers = [];
-  
+
   // Get offers where user is the sender
   if (role === "sender" || role === "both") {
     const params = {
       TableName: MESSAGES_TABLE,
-      IndexName: "senderId-timestamp-index",
+      IndexName: "GSI1",
       KeyConditionExpression: "senderId = :userId",
       FilterExpression: "messageType = :messageType",
       ExpressionAttributeValues: {
         ":userId": userId,
-        ":messageType": "tradeOffer"
-      }
+        ":messageType": "tradeOffer",
+      },
     };
-    
+
     // Add status filter if specified
     if (status) {
       params.FilterExpression += " AND #status = :status";
       params.ExpressionAttributeValues[":status"] = status;
-      if (!params.ExpressionAttributeNames) params.ExpressionAttributeNames = {};
+      if (!params.ExpressionAttributeNames)
+        params.ExpressionAttributeNames = {};
       params.ExpressionAttributeNames["#status"] = "status";
     }
-    
+
     const result = await dynamoDB.send(new QueryCommand(params));
     if (result.Items?.length) {
       allOffers = allOffers.concat(result.Items);
     }
   }
-  
+
   // Get offers where user is the receiver
   if (role === "receiver" || role === "both") {
     const params = {
       TableName: MESSAGES_TABLE,
-      IndexName: "receiverId-timestamp-index",
+      IndexName: "GSI2",
       KeyConditionExpression: "receiverId = :userId",
       FilterExpression: "messageType = :messageType",
       ExpressionAttributeValues: {
         ":userId": userId,
-        ":messageType": "tradeOffer"
-      }
+        ":messageType": "tradeOffer",
+      },
     };
-    
+
     // Add status filter if specified
     if (status) {
       params.FilterExpression += " AND #status = :status";
       params.ExpressionAttributeValues[":status"] = status;
-      if (!params.ExpressionAttributeNames) params.ExpressionAttributeNames = {};
+      if (!params.ExpressionAttributeNames)
+        params.ExpressionAttributeNames = {};
       params.ExpressionAttributeNames["#status"] = "status";
     }
-    
+
     const result = await dynamoDB.send(new QueryCommand(params));
     if (result.Items?.length) {
       allOffers = allOffers.concat(result.Items);
     }
   }
-  
+
   // Sort by timestamp (newest first)
-  return allOffers.sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp));
+  return allOffers.sort(
+    (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
+  );
 };

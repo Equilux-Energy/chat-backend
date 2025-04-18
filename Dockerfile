@@ -1,20 +1,14 @@
-# Base image
 FROM node:18-alpine
 
-# Create app directory
 WORKDIR /usr/src/app
 
-# Copy package files
 COPY package*.json ./
 
-# Install dependencies
-RUN npm install
+# Install production dependencies and handle conflicts
+RUN npm install --omit=dev --legacy-peer-deps
 
-# Copy source code
-COPY ./src ./src
+COPY . .
 
-# Expose the port your app runs on
 EXPOSE 8080
 
-# Command to run the application
 CMD ["node", "src/index.js"]

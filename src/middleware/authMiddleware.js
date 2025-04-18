@@ -1,4 +1,21 @@
 import jwt from "jsonwebtoken";
+import jwksClient from "jwks-rsa";
+import dotenv from "dotenv";
+dotenv.config();
+
+const client = jwksClient({
+  jwksUri: `https://cognito-idp.${process.env.AWS_REGION}.amazonaws.com/${process.env.COGNITO_USER_POOL_ID}/.well-known/jwks.json`,
+});
+
+function getKey(header, callback) {
+  client.getSigningKey(header.kid, (err, key) => {
+    if (err) {
+      return callback(err);
+    }
+    const signingKey = key.publicKey || key.rsaPublicKey;
+    callback(null, signingKey);
+  });
+}
 
 export const authMiddleware = (req, res, next) => {
   console.log("\n🔒 Auth middleware invoked");
@@ -20,40 +37,36 @@ export const authMiddleware = (req, res, next) => {
     }
 
     console.log("🔍 Looking for Authorization header...");
-    // Extract the token from Authorization header
     const authHeader = req.headers.authorization;
+    console.log(authHeader);
     if (!authHeader || !authHeader.startsWith("Bearer ")) {
       console.log("❌ No valid Authorization header found");
-      console.log(`🧾 Found headers: ${JSON.stringify(req.headers, null, 2)}`);
       return res.status(401).json({ error: "No token provided" });
     }
 
     console.log("✓ Authorization header found");
     const token = authHeader.split(" ")[1];
-    console.log(`🔑 Token: ${token.substring(0, 10)}...`); // Log first 10 chars for debugging
+    console.log(`🔑 Token: ${token.substring(0, 10)}...`);
 
-    // For production: You should verify the token with cognito keys
-    // For local testing: Just decode without verification
-    console.log("🔍 Decoding JWT token...");
-    const decoded = jwt.decode(token);
+    // Verify token using Cognito public keys via JWKS endpoint
+    jwt.verify(token, getKey, { algorithms: ["RS256"] }, (err, decoded) => {
+      if (err) {
+        console.log("❌ Token verification failed:", err);
+        return res.status(401).json({ error: "Invalid token" });
+      }
+      console.log(`✅ Token verified successfully for subject: ${decoded.sub}`);
 
-    if (!decoded || !decoded.sub) {
-      console.log("❌ Invalid token structure:", decoded);
-      return res.status(401).json({ error: "Invalid token" });
-    }
+      // Set user info on the request object
+      req.user = {
+        _id: decoded.sub,
+        username: decoded.username || decoded["cognito:username"],
+        email: decoded.email,
+      };
 
-    console.log(`✅ Token decoded successfully for subject: ${decoded.sub}`);
-
-    // Set user info on the request object
-    req.user = {
-      _id: decoded.sub,
-      username: decoded.username || decoded["cognito:username"],
-      email: decoded.email,
-    };
-
-    console.log("👤 User object created:", req.user);
-    console.log("✅ Authentication successful");
-    next();
+      console.log("👤 User object created:", req.user);
+      console.log("✅ Authentication successful");
+      next();
+    });
   } catch (error) {
     console.error("❌ Authentication error:");
     console.error("❌ Error name:", error.name);

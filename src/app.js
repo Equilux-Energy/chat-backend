@@ -20,10 +20,21 @@ app.use((req, res, next) => {
 
 app.use(express.json());
 app.use(cookieParser());
+
+// Single unified CORS configuration
 app.use(
   cors({
-    origin: "*", // Update this for production
+    // This function handles dynamic origin while supporting credentials
+    origin: function (origin, callback) {
+      // For Flutter development: allow all origins but respond with the specific origin
+      // that made the request to enable credentials
+      return callback(null, origin || true);
+    },
     credentials: true,
+    methods: ["GET", "POST", "PUT", "DELETE", "OPTIONS"],
+    allowedHeaders: ["Content-Type", "Authorization", "X-Requested-With"],
+    preflightContinue: false,
+    optionsSuccessStatus: 204,
   })
 );
 

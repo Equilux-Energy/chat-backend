@@ -40,11 +40,11 @@ export const getUsersForSidebar = async (req, res) => {
       return res.status(401).json({ error: "User not authenticated" });
     }
 
-    const loggedInUserId = req.user._id;
-    console.log("👤 Logged in user ID:", loggedInUserId);
+    const loggedInUsername = req.user.username;
+    console.log("👤 Logged in user ID:", loggedInUsername);
 
     const commandStart = startTimer();
-    const users = await getUsersExcept(loggedInUserId);
+    const users = await getUsersExcept(loggedInUsername);
     const queryTime = endTimer(commandStart);
 
     console.log(`✅ User query completed in ${queryTime.toFixed(2)}ms`);
@@ -100,7 +100,7 @@ export const getMessages = async (req, res) => {
     }
 
     const { id: userToChatId } = req.params;
-    const myId = req.user._id;
+    const myId = req.user.username;
 
     // Get pagination parameters from query string
     const limit = parseInt(req.query.limit) || 20;
@@ -196,7 +196,7 @@ export const sendMessage = async (req, res) => {
     }
 
     const { id: receiverId } = req.params;
-    const senderId = req.user._id;
+    const senderId = req.user.username;
 
     // Determine message type and validate accordingly
     const {
@@ -359,9 +359,9 @@ export const respondToTradeOffer = async (req, res) => {
       }
     }
 
-    const userId = req.user._id;
+    const username = req.user.username;
     console.log(
-      `👤 User ${userId} responding to trade offer ${messageId} with: ${response}`
+      `👤 User ${username} responding to trade offer ${messageId} with: ${response}`
     );
 
     // Update the trade offer status using our optimized function
@@ -370,7 +370,7 @@ export const respondToTradeOffer = async (req, res) => {
     try {
       const updatedOffer = await updateTradeOfferStatus(
         messageId,
-        userId,
+        username,
         response,
         req.body
       );
@@ -420,7 +420,7 @@ export const respondToTradeOffer = async (req, res) => {
       if (
         dbError.message === "User not authorized to respond to this trade offer"
       ) {
-        console.error("❌ User not authorized:", userId);
+        console.error("❌ User not authorized:", username);
         return res
           .status(403)
           .json({ error: "Not authorized to respond to this trade offer" });
@@ -460,15 +460,15 @@ export const getConversations = async (req, res) => {
       return res.status(401).json({ error: "User not authenticated" });
     }
 
-    const userId = req.user._id;
+    const username = req.user.username;
     const limit = parseInt(req.query.limit) || 20;
 
     console.log(
-      `👤 Getting recent conversations for user: ${userId}, limit: ${limit}`
+      `👤 Getting recent conversations for user: ${username}, limit: ${limit}`
     );
 
     const queryStart = startTimer();
-    const conversations = await getRecentConversationsForUser(userId, limit);
+    const conversations = await getRecentConversationsForUser(username, limit);
     const queryTime = endTimer(queryStart);
 
     console.log(
@@ -519,17 +519,17 @@ export const getUserTradeOffers = async (req, res) => {
       return res.status(401).json({ error: "User not authenticated" });
     }
 
-    const userId = req.user._id;
+    const username = req.user.username;
     const { role = "both", status } = req.query;
 
     console.log(
-      `👤 Getting trade offers for user: ${userId}, role: ${role}, status: ${
+      `👤 Getting trade offers for user: ${username}, role: ${role}, status: ${
         status || "all"
       }`
     );
 
     const queryStart = startTimer();
-    const tradeOffers = await getTradeOffersForUser(userId, role, status);
+    const tradeOffers = await getTradeOffersForUser(username, role, status);
     const queryTime = endTimer(queryStart);
 
     console.log(`✅ Trade offers query completed in ${queryTime.toFixed(2)}ms`);
