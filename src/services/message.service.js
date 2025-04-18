@@ -98,77 +98,150 @@ export const createMessage = async (senderId, receiverId, messageData) => {
 /**
  * Update a trade offer's status based on the recipient's response
  * @param {string} messageId - ID of the message/trade offer
- * @param {string} responderId - ID of the user responding to the offer
+ * @param {string} username - Username of the user responding to the offer
  * @param {string} response - Response type: "accept", "reject", or "counter"
- * @param {Object} responseData - Additional data for the response
+ * @param {Object} counterData - Additional data for the counter offer
  * @returns {Promise<Object>} Updated message object
  */
 export const updateTradeOfferStatus = async (
   messageId,
-  responderId,
+  username,
   response,
-  responseData = {}
+  counterData
 ) => {
-  // Use the improved findMessageById function
-  const message = await findMessageById(messageId);
+  try {
+    // Get the original message first
+    const message = await findMessageById(messageId);
 
-  if (!message) {
-    throw new Error("Message not found");
-  }
-
-  if (message.messageType !== "tradeOffer") {
-    throw new Error("Message is not a trade offer");
-  }
-
-  // Verify the responder is the receiver of the trade offer
-  if (message.receiverId !== responderId) {
-    throw new Error("User not authorized to respond to this trade offer");
-  }
-
-  // Prepare update based on response type
-  let updateExpression =
-    "SET #status = :status, updatedAt = :updatedAt, responseTimestamp = :responseTimestamp";
-  let expressionAttributeNames = { "#status": "status" };
-  let expressionAttributeValues = {
-    ":status": response,
-    ":updatedAt": new Date().toISOString(),
-    ":responseTimestamp": new Date().toISOString(),
-  };
-
-  // Add additional fields for counter offers
-  if (response === "counter") {
-    // Validate counter offer data
-    if (!responseData.pricePerUnit || responseData.pricePerUnit <= 0) {
-      throw new Error("Counter offer requires valid price per unit");
-    }
-    if (!responseData.totalAmount || responseData.totalAmount <= 0) {
-      throw new Error("Counter offer requires valid total amount");
+    if (!message) {
+      console.error(`❌ Cannot find message with ID ${messageId}`);
+      return null;
     }
 
-    updateExpression += ", counterOffer = :counterOffer";
-    expressionAttributeValues[":counterOffer"] = {
-      pricePerUnit: responseData.pricePerUnit,
-      totalAmount: responseData.totalAmount,
-      startTime: responseData.startTime || message.startTime,
-    };
+    // Validate message is a trade offer
+    if (message.messageType !== "tradeOffer") {
+      console.error(`❌ Message ${messageId} is not a trade offer`);
+      return null;
+    }
+
+    // Check for permissions (only receiver can respond)
+    if (message.receiverId !== username) {
+      console.error(
+        `❌ User ${username} is not authorized to respond to this offer`
+      );
+      return null;
+    }
+
+    // Check current status allows transitions (only pending offers can be responded to)
+    if (message.status !== "pending") {
+      console.error(`❌ Cannot respond to offer with status ${message.status}`);
+      return null;
+    }
+
+    // Now process based on response type
+    if (response === "accept") {
+      // Accept the offer
+      const acceptedOffer = {
+        ...message,
+        status: "accepted",
+        acceptedAt: new Date().toISOString(),
+      };
+
+      // Save the updated offer to DynamoDB
+      const params = {
+        TableName: MESSAGES_TABLE,
+        Item: acceptedOffer,
+      };
+
+      const command = new PutCommand(params);
+      await dynamoDB.send(command);
+
+      return acceptedOffer;
+    } else if (response === "reject") {
+      // Reject the offer
+      const rejectedOffer = {
+        ...message,
+        status: "rejected",
+        rejectedAt: new Date().toISOString(),
+      };
+
+      // Save the updated offer to DynamoDB
+      const params = {
+        TableName: MESSAGES_TABLE,
+        Item: rejectedOffer,
+      };
+
+      const command = new PutCommand(params);
+      await dynamoDB.send(command);
+
+      return rejectedOffer;
+    } else if (response === "counter") {
+      // Validate counter offer data
+      if (!counterData.pricePerUnit || !counterData.totalAmount) {
+        console.error(`❌ Missing required counter offer data`);
+        return null;
+      }
+
+      try {
+        // Initialize negotiationHistory if it doesn't exist
+        const negotiationHistory = message.negotiationHistory || [];
+
+        // Create counter offer entry
+        const counterOfferEntry = {
+          userId: username, // Who made this counter
+          timestamp: new Date().toISOString(),
+          pricePerUnit: counterData.pricePerUnit,
+          totalAmount: counterData.totalAmount,
+          startTime: counterData.startTime || message.startTime,
+          tradeType:
+            counterData.tradeType ||
+            (message.tradeType === "buy" ? "sell" : "buy"),
+          action: "counter",
+        };
+
+        // Add this counter to history
+        negotiationHistory.push(counterOfferEntry);
+
+        // Update the original offer with negotiation history
+        const updatedOffer = {
+          ...message,
+          status: "negotiating", // New status for ongoing negotiations
+          lastUpdated: new Date().toISOString(),
+          currentProposal: {
+            // The current terms on the table
+            pricePerUnit: counterData.pricePerUnit,
+            totalAmount: counterData.totalAmount,
+            startTime: counterData.startTime || message.startTime,
+            tradeType:
+              counterData.tradeType ||
+              (message.tradeType === "buy" ? "sell" : "buy"),
+            proposedBy: username,
+          },
+          negotiationHistory,
+        };
+
+        // Save the updated offer
+        const params = {
+          TableName: MESSAGES_TABLE,
+          Item: updatedOffer,
+        };
+
+        const command = new PutCommand(params);
+        await dynamoDB.send(command);
+
+        return updatedOffer;
+      } catch (dbError) {
+        console.error(`❌ DynamoDB error creating counter offer:`, dbError);
+        throw dbError;
+      }
+    } else {
+      console.error(`❌ Invalid response type: ${response}`);
+      return null;
+    }
+  } catch (error) {
+    console.error(`❌ Error in updateTradeOfferStatus:`, error);
+    throw error;
   }
-
-  const updateParams = {
-    TableName: MESSAGES_TABLE,
-    Key: {
-      conversationId: message.conversationId,
-      timestamp: message.timestamp,
-    },
-    UpdateExpression: updateExpression,
-    ExpressionAttributeNames: expressionAttributeNames,
-    ExpressionAttributeValues: expressionAttributeValues,
-    ReturnValues: "ALL_NEW",
-  };
-
-  const { Attributes: updatedMessage } = await dynamoDB.send(
-    new UpdateCommand(updateParams)
-  );
-  return updatedMessage;
 };
 
 /**
@@ -401,76 +474,76 @@ export const getMessagesBetweenUsersPaginated = async (
 /**
  * Get all trade offers for a user (either as sender or receiver)
  *
- * @param {string} userId - ID of the user
+ * @param {string} username - Username of the user
  * @param {string} role - "sender" or "receiver" or "both"
  * @param {string} status - Filter by status: "pending", "accept", "reject", "counter", or null for all
+ * @param {string} tradeType - Filter by trade type: "buy", "sell", or null for all
  * @returns {Promise<Array>} Array of trade offers
  */
 export const getTradeOffersForUser = async (
-  userId,
+  username,
   role = "both",
-  status = null
+  status,
+  tradeType
 ) => {
-  let allOffers = [];
+  console.log(`Starting getTradeOffersForUser query for ${username}`);
 
-  // Get offers where user is the sender
-  if (role === "sender" || role === "both") {
-    const params = {
-      TableName: MESSAGES_TABLE,
-      IndexName: "GSI1",
-      KeyConditionExpression: "senderId = :userId",
-      FilterExpression: "messageType = :messageType",
-      ExpressionAttributeValues: {
-        ":userId": userId,
-        ":messageType": "tradeOffer",
-      },
-    };
+  // Build FilterExpression based on parameters
+  let filterExpressions = [];
+  let expressionAttributeValues = {
+    ":tradeOfferType": "tradeOffer",
+  };
 
-    // Add status filter if specified
-    if (status) {
-      params.FilterExpression += " AND #status = :status";
-      params.ExpressionAttributeValues[":status"] = status;
-      if (!params.ExpressionAttributeNames)
-        params.ExpressionAttributeNames = {};
-      params.ExpressionAttributeNames["#status"] = "status";
-    }
+  // Initialize ExpressionAttributeNames conditionally
+  let expressionAttributeNames = {};
 
-    const result = await dynamoDB.send(new QueryCommand(params));
-    if (result.Items?.length) {
-      allOffers = allOffers.concat(result.Items);
-    }
+  // Handle role filtering (sender or receiver)
+  if (role === "sender") {
+    filterExpressions.push("senderId = :userId");
+    expressionAttributeValues[":userId"] = username;
+  } else if (role === "receiver") {
+    filterExpressions.push("receiverId = :userId");
+    expressionAttributeValues[":userId"] = username;
+  } else {
+    // Both - user is either sender or receiver
+    filterExpressions.push("(senderId = :userId OR receiverId = :userId)");
+    expressionAttributeValues[":userId"] = username;
   }
 
-  // Get offers where user is the receiver
-  if (role === "receiver" || role === "both") {
-    const params = {
-      TableName: MESSAGES_TABLE,
-      IndexName: "GSI2",
-      KeyConditionExpression: "receiverId = :userId",
-      FilterExpression: "messageType = :messageType",
-      ExpressionAttributeValues: {
-        ":userId": userId,
-        ":messageType": "tradeOffer",
-      },
-    };
+  // Filter by message type (always tradeOffer)
+  filterExpressions.push("messageType = :tradeOfferType");
 
-    // Add status filter if specified
-    if (status) {
-      params.FilterExpression += " AND #status = :status";
-      params.ExpressionAttributeValues[":status"] = status;
-      if (!params.ExpressionAttributeNames)
-        params.ExpressionAttributeNames = {};
-      params.ExpressionAttributeNames["#status"] = "status";
-    }
-
-    const result = await dynamoDB.send(new QueryCommand(params));
-    if (result.Items?.length) {
-      allOffers = allOffers.concat(result.Items);
-    }
+  // Handle status filtering if specified
+  if (status) {
+    filterExpressions.push("#status = :status");
+    expressionAttributeValues[":status"] = status;
+    expressionAttributeNames["#status"] = "status"; // Only add when used
   }
 
-  // Sort by timestamp (newest first)
-  return allOffers.sort(
-    (a, b) => new Date(b.timestamp) - new Date(a.timestamp)
-  );
+  // Handle trade type filtering if specified
+  if (tradeType && ["buy", "sell"].includes(tradeType)) {
+    filterExpressions.push("tradeType = :tradeType");
+    expressionAttributeValues[":tradeType"] = tradeType;
+  }
+
+  // Combine all filter expressions
+  const filterExpression = filterExpressions.join(" AND ");
+
+  // Construct your DynamoDB query params
+  const params = {
+    TableName: MESSAGES_TABLE,
+    FilterExpression: filterExpression,
+    ExpressionAttributeValues: expressionAttributeValues,
+  };
+
+  // Only add ExpressionAttributeNames if we have any
+  if (Object.keys(expressionAttributeNames).length > 0) {
+    params.ExpressionAttributeNames = expressionAttributeNames;
+  }
+
+  // Execute the query
+  const command = new ScanCommand(params);
+  const result = await dynamoDB.send(command);
+
+  return result.Items || [];
 };
