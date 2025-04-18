@@ -203,8 +203,10 @@ export const sendMessage = async (req, res) => {
       text,
       messageType = "text",
       pricePerUnit,
-      startTime: tradeStartTime, // Rename to avoid conflict
+      startTime: tradeStartTime, // Renamed to avoid conflict
       totalAmount,
+      tradeType, // New: buy or sell indicator
+      tradeOfferId, // New: smart contract generated ID
     } = req.body;
 
     // Common validation for all message types
@@ -226,7 +228,6 @@ export const sendMessage = async (req, res) => {
       }
 
       if (!tradeStartTime) {
-        // Use renamed variable
         console.warn("⚠️ Missing start time in trade offer");
         return res.status(400).json({ error: "Start time is required" });
       }
@@ -238,9 +239,21 @@ export const sendMessage = async (req, res) => {
           .json({ error: "Valid total amount is required" });
       }
 
+      // Validate trade type (buy/sell)
+      if (!tradeType || !["buy", "sell"].includes(tradeType)) {
+        console.warn("⚠️ Invalid or missing trade type");
+        return res
+          .status(400)
+          .json({ error: "Trade type must be 'buy' or 'sell'" });
+      }
+
       console.log(
-        `⚡ Energy trade details: ${pricePerUnit} per unit, ${totalAmount} total, starting at ${tradeStartTime}`
+        `⚡ Energy trade details: ${tradeType.toUpperCase()} offer, ${pricePerUnit} per unit, ${totalAmount} total, starting at ${tradeStartTime}`
       );
+
+      if (tradeOfferId) {
+        console.log(`🔗 Smart contract trade offer ID: ${tradeOfferId}`);
+      }
     }
 
     console.log(
@@ -264,6 +277,8 @@ export const sendMessage = async (req, res) => {
         startTime: tradeStartTime, // Use renamed variable
         totalAmount,
         status: "pending", // Initial status for trade offers
+        tradeType, // Add trade type (buy/sell)
+        tradeOfferId, // Add smart contract ID if available
       };
     }
 
@@ -520,16 +535,21 @@ export const getUserTradeOffers = async (req, res) => {
     }
 
     const username = req.user.username;
-    const { role = "both", status } = req.query;
+    const { role = "both", status, tradeType } = req.query; // Add tradeType
 
     console.log(
       `👤 Getting trade offers for user: ${username}, role: ${role}, status: ${
         status || "all"
-      }`
+      }, trade type: ${tradeType || "all"}`
     );
 
     const queryStart = startTimer();
-    const tradeOffers = await getTradeOffersForUser(username, role, status);
+    const tradeOffers = await getTradeOffersForUser(
+      username,
+      role,
+      status,
+      tradeType
+    );
     const queryTime = endTimer(queryStart);
 
     console.log(`✅ Trade offers query completed in ${queryTime.toFixed(2)}ms`);
