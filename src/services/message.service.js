@@ -109,7 +109,6 @@ export const updateTradeOfferStatus = async (
   response,
   counterData
 ) => {
-<<<<<<< HEAD
   try {
     // Get the original message first
     const message = await findMessageById(messageId);
@@ -243,58 +242,6 @@ export const updateTradeOfferStatus = async (
     console.error(`❌ Error in updateTradeOfferStatus:`, error);
     throw error;
   }
-=======
-  // Fetch the original message
-  const message = await findMessageById(messageId);
-
-  if (!message) {
-    throw new Error("Message not found");
-  }
-
-  if (message.messageType !== "tradeOffer") {
-    throw new Error("Message is not a trade offer");
-  }
-
-  // Verify the responder is the receiver of the trade offer
-  if (message.receiverId !== username) {
-    throw new Error("User not authorized to respond to this trade offer");
-  }
-
-  if (response === "counter") {
-    // Create a new counter offer
-    const counterOffer = {
-      senderId: message.receiverId,
-      receiverId: message.senderId,
-      text: "Counter offer",
-      messageType: "tradeOffer",
-      pricePerUnit: counterData.pricePerUnit,
-      totalAmount: counterData.totalAmount,
-      startTime: counterData.startTime || message.startTime,
-      status: "pending",
-      originalOfferId: messageId,
-      // Toggle trade type if not explicitly provided in counter offer
-      tradeType:
-        counterData.tradeType || (message.tradeType === "buy" ? "sell" : "buy"),
-      // No tradeOfferId yet - this will be generated when accepted
-      timestamp: new Date().toISOString(),
-    };
-
-    // Save counter offer...
-  } else if (response === "accept") {
-    // Handle accepted offer
-    const originalOfferUpdate = {
-      ...message,
-      status: "accepted",
-      acceptedAt: new Date().toISOString(),
-      // Assuming smart contract generates tradeOfferId on acceptance
-      // tradeOfferId: counterData.tradeOfferId
-    };
-
-    // Update original offer...
-  }
-
-  // Rest of the function...
->>>>>>> 8e83e01f642af86f720c0d1a1ab5edc7d4426fb6
 };
 
 /**
@@ -547,12 +494,9 @@ export const getTradeOffersForUser = async (
     ":tradeOfferType": "tradeOffer",
   };
 
-<<<<<<< HEAD
   // Initialize ExpressionAttributeNames conditionally
   let expressionAttributeNames = {};
 
-=======
->>>>>>> 8e83e01f642af86f720c0d1a1ab5edc7d4426fb6
   // Handle role filtering (sender or receiver)
   if (role === "sender") {
     filterExpressions.push("senderId = :userId");
@@ -573,10 +517,7 @@ export const getTradeOffersForUser = async (
   if (status) {
     filterExpressions.push("#status = :status");
     expressionAttributeValues[":status"] = status;
-<<<<<<< HEAD
     expressionAttributeNames["#status"] = "status"; // Only add when used
-=======
->>>>>>> 8e83e01f642af86f720c0d1a1ab5edc7d4426fb6
   }
 
   // Handle trade type filtering if specified
@@ -593,7 +534,6 @@ export const getTradeOffersForUser = async (
     TableName: MESSAGES_TABLE,
     FilterExpression: filterExpression,
     ExpressionAttributeValues: expressionAttributeValues,
-<<<<<<< HEAD
   };
 
   // Only add ExpressionAttributeNames if we have any
@@ -601,13 +541,6 @@ export const getTradeOffersForUser = async (
     params.ExpressionAttributeNames = expressionAttributeNames;
   }
 
-=======
-    ExpressionAttributeNames: {
-      "#status": "status", // status is a reserved word in DynamoDB
-    },
-  };
-
->>>>>>> 8e83e01f642af86f720c0d1a1ab5edc7d4426fb6
   // Execute the query
   const command = new ScanCommand(params);
   const result = await dynamoDB.send(command);
