@@ -99,8 +99,8 @@ export const getMessages = async (req, res) => {
       return res.status(400).json({ error: "Recipient ID is required" });
     }
 
-    const myId = req.user.username; // Use username consistently
     const { id: userToChatId } = req.params;
+    const myId = req.user.username;
 
     // Get pagination parameters from query string
     const limit = parseInt(req.query.limit) || 20;
@@ -195,18 +195,16 @@ export const sendMessage = async (req, res) => {
       return res.status(400).json({ error: "Recipient ID is required" });
     }
 
-    const myId = req.user.username; // Use username consistently, NOT req.user._id
-    const { id: userToChatId } = req.params;
+    const { id: receiverId } = req.params;
+    const senderId = req.user.username;
 
     // Determine message type and validate accordingly
     const {
       text,
       messageType = "text",
       pricePerUnit,
-      startTime: tradeStartTime, // Renamed to avoid conflict
+      startTime: tradeStartTime, // Rename to avoid conflict
       totalAmount,
-      tradeType, // New: buy or sell indicator
-      tradeOfferId, // New: smart contract generated ID
     } = req.body;
 
     // Common validation for all message types
@@ -228,6 +226,7 @@ export const sendMessage = async (req, res) => {
       }
 
       if (!tradeStartTime) {
+        // Use renamed variable
         console.warn("⚠️ Missing start time in trade offer");
         return res.status(400).json({ error: "Start time is required" });
       }
@@ -239,32 +238,20 @@ export const sendMessage = async (req, res) => {
           .json({ error: "Valid total amount is required" });
       }
 
-      // Validate trade type (buy/sell)
-      if (!tradeType || !["buy", "sell"].includes(tradeType)) {
-        console.warn("⚠️ Invalid or missing trade type");
-        return res
-          .status(400)
-          .json({ error: "Trade type must be 'buy' or 'sell'" });
-      }
-
       console.log(
-        `⚡ Energy trade details: ${tradeType.toUpperCase()} offer, ${pricePerUnit} per unit, ${totalAmount} total, starting at ${tradeStartTime}`
+        `⚡ Energy trade details: ${pricePerUnit} per unit, ${totalAmount} total, starting at ${tradeStartTime}`
       );
-
-      if (tradeOfferId) {
-        console.log(`🔗 Smart contract trade offer ID: ${tradeOfferId}`);
-      }
     }
 
     console.log(
-      `📨 Sending ${messageType} message: from ${myId} to ${userToChatId}`
+      `📨 Sending ${messageType} message: from ${senderId} to ${receiverId}`
     );
 
     const dbStart = startTimer();
 
     let messageData = {
-      senderId: myId,
-      receiverId: userToChatId,
+      senderId,
+      receiverId,
       text,
       messageType,
     };
@@ -277,12 +264,10 @@ export const sendMessage = async (req, res) => {
         startTime: tradeStartTime, // Use renamed variable
         totalAmount,
         status: "pending", // Initial status for trade offers
-        tradeType, // Add trade type (buy/sell)
-        tradeOfferId, // Add smart contract ID if available
       };
     }
 
-    const newMessage = await createMessage(myId, userToChatId, messageData);
+    const newMessage = await createMessage(senderId, receiverId, messageData);
     const dbTime = endTimer(dbStart); // This should work correctly now
 
     console.log(
@@ -292,7 +277,7 @@ export const sendMessage = async (req, res) => {
     // Socket.io notification using the socket service
     console.log("🔍 Sending real-time notification...");
     const socketStart = startTimer();
-    const notificationResult = notifyNewMessage(userToChatId, newMessage);
+    const notificationResult = notifyNewMessage(receiverId, newMessage);
     const socketTime = endTimer(socketStart);
 
     if (notificationResult.success) {
@@ -326,46 +311,62 @@ export const respondToTradeOffer = async (req, res) => {
   const startTime = startTimer();
   console.log("\n🔍 respondToTradeOffer called");
   console.log("📅 Timestamp:", new Date().toISOString());
+  console.log("🔑 Request headers:", JSON.stringify(req.headers, null, 2));
   console.log("🔤 Request params:", req.params);
   console.log("📦 Request body:", JSON.stringify(req.body, null, 2));
+  console.log("🌐 Client IP:", req.ip || req.connection.remoteAddress);
 
   try {
-    // Authentication checks...
+    console.log("⏳ Starting trade offer response process...");
+
+    // Check if user is authenticated
+    if (!req.user || !req.user._id) {
+      console.error("❌ Authentication failed: No user object or user ID");
+      return res.status(401).json({ error: "User not authenticated" });
+    }
 
     const { messageId } = req.params;
     const { response } = req.body;
 
-    // Validation checks...
+    if (!messageId) {
+      console.error("❌ Missing message ID in URL parameters");
+      return res.status(400).json({ error: "Message ID is required" });
+    }
+
+    if (!response || !["accept", "reject", "counter"].includes(response)) {
+      console.warn("⚠️ Invalid trade response");
+      return res
+        .status(400)
+        .json({ error: "Valid response (accept/reject/counter) is required" });
+    }
+
+    // Additional validation for counter offers
+    if (response === "counter") {
+      const { pricePerUnit, totalAmount } = req.body;
+
+      if (!pricePerUnit || pricePerUnit <= 0) {
+        console.warn("⚠️ Invalid price per unit in counter offer");
+        return res.status(400).json({
+          error: "Valid price per unit is required for counter offers",
+        });
+      }
+
+      if (!totalAmount || totalAmount <= 0) {
+        console.warn("⚠️ Invalid total amount in counter offer");
+        return res
+          .status(400)
+          .json({ error: "Valid total amount is required for counter offers" });
+      }
+    }
 
     const username = req.user.username;
     console.log(
       `👤 User ${username} responding to trade offer ${messageId} with: ${response}`
     );
 
-    // First check if the message exists before processing
-    const message = await findMessageById(messageId);
-
-    if (!message) {
-      console.error(`❌ Trade offer not found: ${messageId}`);
-      return res.status(404).json({ error: "Trade offer not found" });
-    }
-
-    if (message.messageType !== "tradeOffer") {
-      console.error(`❌ Message is not a trade offer: ${messageId}`);
-      return res.status(400).json({ error: "Message is not a trade offer" });
-    }
-
-    if (message.receiverId !== username) {
-      console.error(
-        `❌ User ${username} not authorized to respond to offer ${messageId}`
-      );
-      return res
-        .status(403)
-        .json({ error: "Not authorized to respond to this trade offer" });
-    }
-
-    // Now proceed with updating the trade offer status
+    // Update the trade offer status using our optimized function
     const dbStart = startTimer();
+
     try {
       const updatedOffer = await updateTradeOfferStatus(
         messageId,
@@ -373,11 +374,6 @@ export const respondToTradeOffer = async (req, res) => {
         response,
         req.body
       );
-
-      if (!updatedOffer) {
-        console.error(`❌ Failed to update trade offer ${messageId}`);
-        return res.status(500).json({ error: "Failed to update trade offer" });
-      }
 
       const dbTime = endTimer(dbStart);
       console.log(
@@ -396,36 +392,55 @@ export const respondToTradeOffer = async (req, res) => {
       const socketTime = endTimer(socketStart);
 
       if (notificationResult.success) {
-        console.log(
-          `✅ Socket notification sent successfully in ${socketTime.toFixed(
-            2
-          )}ms`
-        );
+        console.log(`✅ Trade response notification sent successfully`);
       } else {
         console.log(
           `ℹ️ ${notificationResult.reason || "Notification not sent"}`
         );
       }
 
-      // Send successful response to client
-      console.log(`📤 Sending success response with status 200`);
-      res.status(200).json(updatedOffer);
+      console.log(
+        `⏱️ Socket operations completed in ${socketTime.toFixed(2)}ms`
+      );
 
-      const totalTime = endTimer(startTime);
-      console.log(`⏱️ Total execution time: ${totalTime.toFixed(2)}ms`);
+      console.log("📤 Sending success response with status 200");
+      res.status(200).json(updatedOffer);
     } catch (dbError) {
-      console.error("❌ Database error in respondToTradeOffer:");
-      console.error("❌ Error name:", dbError.name);
-      console.error("❌ Error message:", dbError.message);
-      console.error("❌ Error stack:", dbError.stack);
-      return res.status(500).json({ error: "Database error occurred" });
+      // Handle specific database errors
+      if (dbError.message === "Message not found") {
+        console.error("❌ Trade offer not found:", messageId);
+        return res.status(404).json({ error: "Trade offer not found" });
+      }
+
+      if (dbError.message === "Message is not a trade offer") {
+        console.error("❌ Message is not a trade offer:", messageId);
+        return res.status(400).json({ error: "Message is not a trade offer" });
+      }
+
+      if (
+        dbError.message === "User not authorized to respond to this trade offer"
+      ) {
+        console.error("❌ User not authorized:", username);
+        return res
+          .status(403)
+          .json({ error: "Not authorized to respond to this trade offer" });
+      }
+
+      // Re-throw other errors to be caught by the outer catch block
+      throw dbError;
     }
+
+    const totalTime = endTimer(startTime);
+    console.log(`⏱️ Total execution time: ${totalTime.toFixed(2)}ms\n`);
   } catch (error) {
-    console.error("❌ General error in respondToTradeOffer:");
+    console.error("❌ Error in respondToTradeOffer:");
     console.error("❌ Error name:", error.name);
     console.error("❌ Error message:", error.message);
     console.error("❌ Error stack:", error.stack);
-    return res.status(500).json({ error: "Internal server error" });
+    console.error("❌ AWS Error code:", error.code);
+    console.error("❌ AWS Request ID:", error.$metadata?.requestId);
+    console.log("📤 Sending error response with status 500");
+    res.status(500).json({ error: "Internal server error" });
   }
 };
 
@@ -505,21 +520,16 @@ export const getUserTradeOffers = async (req, res) => {
     }
 
     const username = req.user.username;
-    const { role = "both", status, tradeType } = req.query; // Add tradeType
+    const { role = "both", status } = req.query;
 
     console.log(
       `👤 Getting trade offers for user: ${username}, role: ${role}, status: ${
         status || "all"
-      }, trade type: ${tradeType || "all"}`
+      }`
     );
 
     const queryStart = startTimer();
-    const tradeOffers = await getTradeOffersForUser(
-      username,
-      role,
-      status,
-      tradeType
-    );
+    const tradeOffers = await getTradeOffersForUser(username, role, status);
     const queryTime = endTimer(queryStart);
 
     console.log(`✅ Trade offers query completed in ${queryTime.toFixed(2)}ms`);
